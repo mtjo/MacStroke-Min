@@ -90,6 +90,9 @@ export default {
       this.state = snapshot.state
       this.lastError = snapshot.lastError
       this.target = snapshot.target
+      // 掉线时 Mac 会自己补一个松开，按钮状态要跟着回落，否则重连后显示
+      // 「按住中」而 Mac 其实早就松了，再点一下才会真的按下。
+      if (snapshot.state !== 'open' && this.held) this.held = false
     })
     if (remote.savedTarget()) remote.connect()
   },
