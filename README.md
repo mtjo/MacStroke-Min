@@ -47,7 +47,7 @@ MacStroke 在 Mac 上监听一个 TCP 端口（默认 8848），偏好页把「�
      `-10008 invalid ip` 挡掉（本机实测命中过）。
 2. 把密钥 base64 成一行，存进仓库 secret（名称必须是 `WX_UPLOAD_KEY_B64`）：
    ```bash
-   base64 -i ~/Downloads/private.wx441afe8e18ebd358.key | tr -d '\n' | pbcopy
+   base64 < ~/Downloads/private.wx441afe8e18ebd358.key | tr -d '\n' | pbcopy
    ```
    GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret。
 3. 发版：

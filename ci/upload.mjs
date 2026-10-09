@@ -123,7 +123,7 @@ function loadKey() {
   // base64 在后台复制时被截断只能靠长度露出来，所以报长度、不报内容。
   if (key.length < 200 || !text.includes('PRIVATE KEY')) {
     die(`密钥解码后只有 ${key.length} 字节、或不含 PRIVATE KEY 头，多半是 base64 被截断`,
-      '重新生成一次：base64 -i private.<appid>.key | tr -d \'\\n\'')
+      '重新生成一次：base64 < private.<appid>.key | tr -d \'\\n\'（别写 base64 -i，装了 coreutils 的机器上那是 GNU 版、不认 -i）')
   }
   const path = `/tmp/private.${process.pid}.key`
   writeFileSync(path, text, { mode: 0o600 })

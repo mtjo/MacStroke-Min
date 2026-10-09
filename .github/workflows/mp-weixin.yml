@@ -11,7 +11,8 @@
 #
 # 密钥只有一个：仓库 secret WX_UPLOAD_KEY_B64
 #   值 = 小程序后台「开发管理 → 开发设置 → 小程序代码上传」下载的 private.<appid>.key
-#        整份 base64 成一行（macOS: base64 -i private.wx441afe8e18ebd358.key | tr -d '\n' | pbcopy）
+#        整份 base64 成一行：base64 < private.wx441afe8e18ebd358.key | tr -d '\n' | pbcopy
+#        （用重定向而不是 base64 -i：装了 coreutils 的 mac 上 base64 是 GNU 版，不认 -i）
 # 另有一条后台开关不在这里配、配了也没用：「IP 白名单」必须保持关闭 ——
 # GitHub 构建机出口 IP 不固定，开了必被 -10008 invalid ip 挡掉（本机实测命中过）。
 
