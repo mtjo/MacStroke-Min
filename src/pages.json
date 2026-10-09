@@ -3,7 +3,8 @@
 		{
 			"path": "pages/index/index",
 			"style": {
-				"navigationBarTitleText": "MacStroke 遥控"
+				"navigationBarTitleText": "MacStroke 遥控",
+				"disableScroll": true
 			}
 		},
 		{

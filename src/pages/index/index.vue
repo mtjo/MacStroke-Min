@@ -14,7 +14,7 @@
       </view>
     </view>
 
-    <view class="card">
+    <view class="card pad-card">
       <text class="label">摇杆区（手指滑动即移动光标）</text>
       <view
         class="pad"
@@ -182,7 +182,12 @@ export default {
 
 <style>
 .page {
+  box-sizing: border-box;
+  height: 100vh;
   padding: 24rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
 }
 
 .card {
@@ -190,6 +195,17 @@ export default {
   border-radius: 20rpx;
   padding: 24rpx;
   margin-bottom: 24rpx;
+}
+
+.card:last-child {
+  margin-bottom: 0;
+}
+
+.pad-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .row {
@@ -250,7 +266,8 @@ export default {
 }
 
 .pad {
-  height: 420rpx;
+  flex: 1;
+  min-height: 260rpx;
   border-radius: 20rpx;
   background: #f2f2f7;
   display: flex;
