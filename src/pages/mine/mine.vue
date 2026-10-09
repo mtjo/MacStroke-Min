@@ -1,6 +1,15 @@
 <template>
   <view class="page">
     <view class="card">
+      <text class="h1">连接</text>
+      <status-bar />
+      <view class="row">
+        <button class="mini" size="mini" @tap="reconnect">重新连接</button>
+        <button class="mini" size="mini" @tap="disconnect">断开</button>
+      </view>
+    </view>
+
+    <view class="card">
       <text class="h1">扫码配对</text>
       <text class="tip">在 MacStroke 的「偏好设置 → 远程控制」里打开开关，手机和这台 Mac 连同一个 Wi-Fi，再扫下面的二维码。</text>
       <button class="primary" @tap="scan">扫描二维码</button>
@@ -28,10 +37,13 @@
 </template>
 
 <script>
+import StatusBar from '@/components/StatusBar.vue'
 import { remote } from '@/utils/socket.js'
 import { parsePairing } from '@/utils/pairing.js'
 
 export default {
+  components: { StatusBar },
+
   data() {
     return {
       host: '',
@@ -51,6 +63,14 @@ export default {
   },
 
   methods: {
+    reconnect() {
+      remote.reconnectNow()
+    },
+
+    disconnect() {
+      remote.close()
+    },
+
     scan() {
       uni.scanCode({
         onlyFromCamera: false,
@@ -86,66 +106,7 @@ export default {
       this.message = ''
       remote.configure(target)
       remote.connect(target)
-      uni.navigateBack()
     },
   },
 }
 </script>
-
-<style>
-.page {
-  padding: 24rpx;
-}
-
-.card {
-  background: #ffffff;
-  border-radius: 20rpx;
-  padding: 24rpx;
-  margin-bottom: 24rpx;
-}
-
-.h1 {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 600;
-  margin-bottom: 12rpx;
-}
-
-.tip {
-  display: block;
-  font-size: 24rpx;
-  color: #8e8e93;
-  margin-bottom: 16rpx;
-}
-
-.field {
-  display: flex;
-  align-items: center;
-  border-bottom: 1rpx solid #ebebf0;
-  padding: 16rpx 0;
-}
-
-.name {
-  width: 160rpx;
-  font-size: 28rpx;
-}
-
-.input {
-  flex: 1;
-  font-size: 28rpx;
-}
-
-.primary {
-  margin-top: 24rpx;
-  background: #007aff;
-  color: #ffffff;
-  font-size: 30rpx;
-}
-
-.error {
-  display: block;
-  margin-top: 14rpx;
-  font-size: 24rpx;
-  color: #ff3b30;
-}
-</style>

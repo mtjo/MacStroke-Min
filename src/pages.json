@@ -9,12 +9,46 @@
 			}
 		},
 		{
-			"path": "pages/settings/settings",
+			"path": "pages/joystick/joystick",
 			"style": {
-				"navigationBarTitleText": "配对设置"
+				"navigationBarTitleText": "MacStroke 遥控",
+				"navigationStyle": "custom",
+				"disableScroll": true
+			}
+		},
+		{
+			"path": "pages/mine/mine",
+			"style": {
+				"navigationBarTitleText": "我的"
 			}
 		}
 	],
+	"tabBar": {
+		"color": "#7a7e83",
+		"selectedColor": "#1c7ff2",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/index/index",
+				"text": "触摸板",
+				"iconPath": "static/tab-track-off.png",
+				"selectedIconPath": "static/tab-track-on.png"
+			},
+			{
+				"pagePath": "pages/joystick/joystick",
+				"text": "摇杆",
+				"iconPath": "static/tab-joy-off.png",
+				"selectedIconPath": "static/tab-joy-on.png"
+			},
+			{
+				"pagePath": "pages/mine/mine",
+				"text": "我的",
+				"iconPath": "static/tab-mine-off.png",
+				"selectedIconPath": "static/tab-mine-on.png"
+			}
+		]
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "MacStroke 遥控",

@@ -193,6 +193,8 @@ export class RemoteSocket {
   }
 
   /// 回到前台：微信这时已经把连接掐了，只有我们这边还显示 open。
+  /// 只在 App.onShow 调，别放进页面 onShow：切一次标签就重建一条 socket，
+  /// Mac 那边会当成掉线自动松开按住键，还白吃「5 分钟 20 个 TCPSocket」的额度。
   resume() {
     if (this.state === 'open') this.connect()
   }
