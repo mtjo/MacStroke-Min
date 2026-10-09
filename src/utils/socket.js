@@ -8,7 +8,7 @@
 //    所以按换行切帧要在字节层面做，切出完整行之后再解码 UTF-8。
 //
 // 协议（对应 MacStroke 的 Sources/RemoteControl/RemoteCommand.swift）：一行一条 JSON。
-//   发出 {"t":"hello","token":…,"name":…} / ping / move{dx,dy} / click{btn,double} / button{btn,down}
+//   发出 {"t":"hello","token":…,"name":…} / ping / move{dx,dy} / click{btn,double} / button{btn,down} / scroll{dx,dy}
 //   收到 welcome / ack / error
 
 const NEWLINE = 0x0a
@@ -294,6 +294,11 @@ export class RemoteSocket {
 
   hold(button, pressed) {
     return this.sendRaw({ t: 'button', btn: button, down: !!pressed })
+  }
+
+  // 双指滚动的位移按手指那侧的像素发，方向就是手指划的方向，翻不翻号由 Mac 定。
+  scroll(dx, dy) {
+    return this.sendRaw({ t: 'scroll', dx: Math.round(dx), dy: Math.round(dy) })
   }
 
   ping() {
