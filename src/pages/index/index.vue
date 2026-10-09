@@ -1,7 +1,7 @@
 <template>
-  <view class="page">
+  <view class="page" :style="{ paddingTop: headTop + 'px' }">
     <view class="card status">
-      <view class="row">
+      <view class="row head">
         <text class="dot" :class="stateClass"></text>
         <text class="state">{{ stateText }}</text>
         <text class="addr" v-if="target">{{ target.host }}:{{ target.port }}</text>
@@ -54,6 +54,15 @@ const PAD_GAIN = 2.6
 // 摇杆发包间隔：再密也只是浪费带宽，Mac 那边按帧消费。
 const PAD_INTERVAL = 60
 
+// 自定义导航后页面顶到屏幕最上沿，第一张卡要让开状态栏和右上角那颗胶囊；
+// 胶囊位置各机型差很多，只能问系统要，拿不到就退回状态栏高度。
+function measureHeadTop() {
+  const statusBar = uni.getSystemInfoSync().statusBarHeight || 20
+  const capsule =
+    typeof uni.getMenuButtonBoundingClientRect === 'function' ? uni.getMenuButtonBoundingClientRect() : null
+  return capsule && capsule.top ? capsule.top : statusBar
+}
+
 export default {
   data() {
     return {
@@ -62,6 +71,7 @@ export default {
       target: null,
       held: false,
       padLive: false,
+      headTop: 20,
       originX: 0,
       originY: 0,
       pendingX: 0,
@@ -86,6 +96,7 @@ export default {
   },
 
   onLoad() {
+    this.headTop = measureHeadTop()
     this.unsubscribe = remote.onChange((snapshot) => {
       this.state = snapshot.state
       this.lastError = snapshot.lastError
@@ -211,6 +222,11 @@ export default {
 .row {
   display: flex;
   align-items: center;
+}
+
+/* 右上角那颗胶囊是微信自己的、永远盖在页面上，状态行别伸进它那块。 */
+.head {
+  padding-right: 200rpx;
 }
 
 .dot {
