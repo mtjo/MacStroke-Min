@@ -30,6 +30,7 @@
     "build:mp-toutiao": "uni build -p mp-toutiao",
     "build:mp-harmony": "uni build -p mp-harmony",
     "build:mp-weixin": "uni build -p mp-weixin",
+    "upload:mp": "node ci/upload.mjs",
     "build:mp-xhs": "uni build -p mp-xhs",
     "build:quickapp-webview": "uni build -p quickapp-webview",
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
@@ -62,6 +63,7 @@
     "@dcloudio/uni-stacktracey": "3.0.0-5020620260917001",
     "@dcloudio/vite-plugin-uni": "3.0.0-5020620260917001",
     "@vue/runtime-core": "^3.4.21",
+    "miniprogram-ci": "^2.1.31",
     "rollup": "4.14.3",
     "vite": "5.2.8"
   }

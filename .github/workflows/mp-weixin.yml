@@ -1,0 +1,88 @@
+# GitHub Actions：编译 uni-app 产物并上传到微信后台（开发版本）
+#
+# 两条触发：
+#   1) 打 vX.Y.Z 的 tag —— 版本号原样传到微信后台，所以先校验形状
+#   2) 手动 Run workflow —— 补传/换描述时用，版本号手填
+#
+# 为什么不用自建 HBuilderX 镜像（SpeedEvent-Min 那条 CNB 流水线的做法）：
+# 本工程是 uni-app CLI 项目（有 package.json），`npm run build:mp-weixin` 就能出产物；
+# 上传交给官方 miniprogram-ci，它是纯 Node 库，失败会 throw —— 省掉 DCloud 登录、
+# Xvfb、实人认证、以及「cli 拒绝干活也返回 0 只能 grep 中文话术」那一整套坑。
+#
+# 密钥只有一个：仓库 secret WX_UPLOAD_KEY_B64
+#   值 = 小程序后台「开发管理 → 开发设置 → 小程序代码上传」下载的 private.<appid>.key
+#        整份 base64 成一行（macOS: base64 -i private.wx441afe8e18ebd358.key | tr -d '\n' | pbcopy）
+# 另有一条后台开关不在这里配、配了也没用：「IP 白名单」必须保持关闭 ——
+# GitHub 构建机出口 IP 不固定，开了必被 -10008 invalid ip 挡掉（本机实测命中过）。
+
+name: 上传微信小程序
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 传给微信后台的版本号（X.Y.Z）
+        required: true
+        default: '1.0.0'
+      desc:
+        description: 版本描述（留空则自动填 tag + 提交号）
+        required: false
+
+# 上传是有外部副作用的动作（微信后台多一个开发版本），正在跑的那次不许被后来的 tag 掐掉
+concurrency:
+  group: mp-weixin-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      # 手动触发时 github.ref_name 是分支名，所以按事件名分流，别直接取
+      MP_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 前置校验（只看有没有，不打印任何密钥内容）
+        env:
+          WX_UPLOAD_KEY_B64: ${{ secrets.WX_UPLOAD_KEY_B64 }}
+        run: |
+          set -e
+          printf '%s' "${MP_VERSION#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "版本号形状要是 X.Y.Z，当前是「${MP_VERSION}」；这个号会原样传到微信后台"; exit 1; }
+          N=$(printf '%s' "$WX_UPLOAD_KEY_B64" | wc -c)
+          # 报长度是因为「复制时被截断」只有靠它对出来；口令类的长度才是提示，密钥不是。
+          [ "$N" -gt 300 ] \
+            || { echo "缺 WX_UPLOAD_KEY_B64 或内容太短（长度=$N）。仓库 Settings → Secrets and variables → Actions 里建同名 secret"; exit 1; }
+          echo "上传密钥已注入（base64 长度=$N，内容不打印）"
+          python3 -c "import json,re;t=re.sub(r'/\*.*?\*/','',open('src/manifest.json',encoding='utf-8').read(),flags=re.S);print('appid=',json.loads(t)['mp-weixin']['appid'])"
+
+      - name: 编译小程序
+        run: |
+          set -e
+          npm ci --no-audit --fund=false
+          npm run build:mp-weixin
+          # 产物条数只作为信息打印：完整性判据在 ci/upload.mjs 里（那边还要按 app.json 逐个页面点名）
+          echo "产物文件数=$(find dist/build/mp-weixin -type f | wc -l)"
+
+      - name: 上传到微信后台
+        env:
+          WX_UPLOAD_KEY_B64: ${{ secrets.WX_UPLOAD_KEY_B64 }}
+          MP_DESC: ${{ inputs.desc }}
+        run: node ci/upload.mjs --version "${MP_VERSION#v}"
+
+      - name: 下一步提示
+        if: success()
+        run: |
+          echo "微信后台已经收到这个开发版本，但体验版要手点："
+          echo "  https://mp.weixin.qq.com → 版本管理 → 开发版本 → 选为体验版"

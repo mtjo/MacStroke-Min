@@ -22,3 +22,7 @@ dist
 # HBuilderX 与本工具链产物
 unpackage/
 .hbuilderx/
+
+# 微信代码上传密钥（后台下载的，绝不入库）
+private.*.key
+*.key
