@@ -81,6 +81,7 @@ export class RemoteSocket {
     this.listeners = []
     this.reconnectTimer = null
     this.closingByHand = false
+    this.refused = false
   }
 
   // MARK: - 订阅
@@ -134,6 +135,7 @@ export class RemoteSocket {
     }
     this.target = target
     this.closingByHand = false
+    this.refused = false
     this.destroySocket()
     this.buffer = new Uint8Array(0)
 
@@ -162,8 +164,10 @@ export class RemoteSocket {
     })
     socket.onClose(() => this.onDropped(socket, '连接已被 Mac 关闭'))
     socket.onError((event) => {
-      const reason = (event && event.code) === 5 ? '连接被拒（Mac 上没开远程控制？）' : '网络中断'
-      this.onDropped(socket, reason)
+      // onError 的载荷只有 errMsg（文档里没有 code），所以「连不上」只能靠这句话判。
+      const msg = (event && event.errMsg) || ''
+      const refused = /refused/i.test(msg)
+      this.onDropped(socket, refused ? '连接被拒（Mac 上没开远程控制？）' : (msg || '网络中断'))
     })
 
     socket.connect({
@@ -196,6 +200,13 @@ export class RemoteSocket {
   onDropped(socket, reason) {
     if (socket !== this.socket || this.closingByHand) return
     this.destroySocket()
+    // Mac 拒过就用那句收尾，别再盖成「连接已被关闭」，也不要拿同一个错配对码
+    // 反复重建连接——微信每 5 分钟只给 20 个 TCPSocket 额度。
+    if (this.refused) {
+      this.state = 'closed'
+      this.emit()
+      return
+    }
     this.lastError = reason
     this.scheduleReconnect()
     this.emit()
@@ -259,13 +270,17 @@ export class RemoteSocket {
       this.screen = payload.screen || null
     } else if (payload.t === 'error') {
       this.lastError = payload.message || 'Mac 拒绝了这次请求'
+      // 记下「Mac 明确拒过」：随后的关闭不该把这句盖掉，重连也只会重复同一个错误
+      this.refused = true
     }
     this.emit()
   }
 
   sendRaw(payload) {
     if (!this.socket || this.state !== 'open') return false
-    this.socket.write({ value: JSON.stringify(payload) + '\n' })
+    // write 收的是位置参数（string | ArrayBuffer），包成对象会被序列化成
+    // "[object Object]" 发出去，Mac 那边只会当作非法行丢掉。
+    this.socket.write(JSON.stringify(payload) + '\n')
     return true
   }
 
