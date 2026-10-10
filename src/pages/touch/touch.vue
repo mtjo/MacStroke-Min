@@ -104,6 +104,7 @@ export default {
       panX: 0,
       panY: 0,
       visible: false,
+      opened: false,
       mode: '',
       fingers: 0,
       moved: 0,
@@ -111,6 +112,7 @@ export default {
       lastX: 0,
       lastY: 0,
       lastSpread: 0,
+      startSpread: 0,
       startX: 0,
       startY: 0,
       dragging: false,
@@ -122,12 +124,16 @@ export default {
       offFrame: null,
     }
     this.unsubscribe = remote.onChange((snapshot) => {
+      const board = this.board
+      const opened = snapshot.state === 'open'
       this.state = snapshot.state
       this.lastError = snapshot.lastError
       this.proto = (snapshot.welcome && snapshot.welcome.proto) || 0
-      // 连接一活过来就把回显要回来：页面开着却没有画面，比什么都像坏了。
-      if (snapshot.state === 'open' && this.board.visible) this.syncMirror()
-      if (snapshot.state !== 'open') this.cancel()
+      // 只在「刚连上」这一次补要画面：每条 ack 都会 emit 一遍，见着 open 就发
+      // mirror 的话，mirror→ack→mirror 自己就能把链路刷满。
+      if (opened && !board.opened && board.visible) this.syncMirror()
+      board.opened = opened
+      if (!opened) this.cancel()
     })
   },
 
@@ -233,13 +239,16 @@ export default {
       }
     },
 
-    /// 手指点 → 主屏归一化坐标（0…1）：Mac 那边按自己的分辨率换算。
+    /// 手指点 → 主屏归一化坐标（0…1），Mac 那边按自己的分辨率换算。
+    /// 竖屏里桌面只占画布中间一条，上下都是黑边：点黑边不该算点到桌面边缘，
+    /// 所以画面外直接返回 null，由调用方当成「没按」。
     normalized(touch) {
       const board = this.board
       const box = this.layout()
       const x = (touch.clientX - board.rect.left - box.x) / box.w
       const y = (touch.clientY - board.rect.top - box.y) / box.h
-      return { x: Math.min(Math.max(x, 0), 1), y: Math.min(Math.max(y, 0), 1) }
+      if (x < 0 || x > 1 || y < 0 || y > 1) return null
+      return { x, y }
     },
 
     /// 手指划过的 CSS 像素换成桌面像素：要让画面上的内容跟着手指走，就得按当前缩放比放大。
@@ -292,7 +301,8 @@ export default {
         board.mode = 'view'
         board.fingers = 2
         const center = mid(touches[0], touches[1])
-        board.lastSpread = dist(touches[0], touches[1])
+        board.startSpread = dist(touches[0], touches[1])
+        board.lastSpread = board.startSpread
         board.lastX = center.clientX
         board.lastY = center.clientY
         return
@@ -301,6 +311,10 @@ export default {
       board.lastY = touches[0].clientY
       if (board.mode) {
         board.fingers = touches.length
+        return
+      }
+      if (!this.pointOf(touches[0].clientX, touches[0].clientY)) {
+        // 起手就在黑边上：这一整段手势都不指向桌面，别让它滚到别的窗口去。
         return
       }
       board.mode = 'pending'
@@ -366,25 +380,33 @@ export default {
         this.releaseHold()
         return
       }
-      const wasTap = (mode === 'pending' || mode === 'view') &&
-        moved <= TAP_SLOP && duration <= TAP_MAX
+      // 双指只捏合、中点不动时 moved 是 0，光看位移会把它当成两指轻点，
+      // 抬手就多发一次右键；所以两指的判据还要看指间距变没过。
+      const pinched = Math.abs(board.lastSpread - board.startSpread) > TAP_SLOP
+      const tapped = moved <= TAP_SLOP && duration <= TAP_MAX
+      const wasTap = (mode === 'pending' || (mode === 'view' && !pinched)) && tapped
       if (!wasTap) return
       if (fingers >= 2) {
         // view 模式记的 lastX/lastY 就是两指中点，右键要点在那儿。
-        remote.warp(...this.pointOf(board.lastX, board.lastY))
+        const target = this.pointOf(board.lastX, board.lastY)
+        if (!target) return
+        remote.warp(...target)
         remote.click('right')
         return
       }
-      remote.warp(...this.pointOf(board.startX, board.startY))
+      const target = this.pointOf(board.startX, board.startY)
+      if (!target) return
+      remote.warp(...target)
       const now = Date.now()
       const doubleTap = now - board.lastTapAt < DOUBLE_TAP_WINDOW
       board.lastTapAt = now
       remote.click('left', doubleTap)
     },
 
+    /// 画面外返回 null，调用方据此什么都不发。
     pointOf(clientX, clientY) {
       const point = this.normalized({ clientX, clientY })
-      return [point.x, point.y]
+      return point ? [point.x, point.y] : null
     },
 
     /// 双指：捏合改缩放，整体平移改视图位移，两件事一起算才跟手。
