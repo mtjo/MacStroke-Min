@@ -17,6 +17,15 @@
 			}
 		},
 		{
+			"path": "pages/touch-land/touch-land",
+			"style": {
+				"navigationBarTitleText": "MacStroke 遥控",
+				"navigationStyle": "custom",
+				"disableScroll": true,
+				"pageOrientation": "landscape"
+			}
+		},
+		{
 			"path": "pages/joystick/joystick",
 			"style": {
 				"navigationBarTitleText": "MacStroke 遥控",

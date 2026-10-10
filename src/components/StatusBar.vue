@@ -3,7 +3,7 @@
     <view class="row">
       <text class="dot" :class="stateClass"></text>
       <text class="state">{{ stateText }}</text>
-      <text class="addr" v-if="target">{{ target.host }}:{{ target.port }}</text>
+      <text class="addr" v-if="target && !compact">{{ target.host }}:{{ target.port }}</text>
     </view>
     <text class="error" v-if="lastError">{{ lastError }}</text>
   </view>
@@ -15,6 +15,11 @@ import { remote } from '@/utils/socket.js'
 /** 控制页顶部的连接状态行：只读，操作都在「我的」里。 */
 export default {
   name: 'StatusBar',
+
+  props: {
+    // 横屏页竖向只有三百来像素，地址那串不值得占一行：只留状态点。
+    compact: { type: Boolean, default: false },
+  },
 
   data() {
     return {
