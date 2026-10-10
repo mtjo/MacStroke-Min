@@ -8,23 +8,42 @@
 //    所以按换行切帧要在字节层面做，切出完整行之后再解码 UTF-8。
 //
 // 协议（对应 MacStroke 的 Sources/RemoteControl/RemoteCommand.swift）：一行一条 JSON。
-//   发出 {"t":"hello","token":…,"name":…} / ping / move{dx,dy} / click{btn,double} / button{btn,down} / scroll{dx,dy}
-//   收到 welcome / ack / error
+//   发出 {"t":"hello","token":…,"name":…} / ping / move{dx,dy} / click{btn,double} / button{btn,down}
+//        / scroll{dx,dy} / warp{x,y} / mirror{on,w,fps,q}
+//   收到 welcome / ack / error，以及开了回显后的 {"t":"frame","i","w","h","jpg":<base64>}
+//
+// 回显帧一行的量级是几十到上百 KB，所以它走单独的订阅通道：既不该为此把整个页面的
+// 状态快照重发一遍，也不该被当成普通报文逐字符解码。
 
 const NEWLINE = 0x0a
 
 // 退避到 20 秒为止：最坏情况 5 分钟内约 16 次重建，压在微信 20 个的额度里。
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 20000]
 
+// 一帧 base64 有几十万个字符，逐字符 out += 能把主线程钉住十几毫秒以上；
+// 连续 ASCII 段攒够一批再一次性转，中文报文照旧走多字节分支。
+const ASCII_RUN = 1024
+
 function decodeUTF8(bytes) {
   let out = ''
+  let run = []
   let i = 0
+  const flush = () => {
+    if (run.length) {
+      out += String.fromCharCode.apply(null, run)
+      run = []
+    }
+  }
   while (i < bytes.length) {
     const b = bytes[i]
     if (b < 0x80) {
-      out += String.fromCharCode(b)
+      run.push(b)
       i += 1
-    } else if (b < 0xe0) {
+      if (run.length >= ASCII_RUN) flush()
+      continue
+    }
+    flush()
+    if (b < 0xe0) {
       out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i + 1] & 0x3f))
       i += 2
     } else if (b < 0xf0) {
@@ -40,6 +59,7 @@ function decodeUTF8(bytes) {
       i += 4
     }
   }
+  flush()
   return out
 }
 
@@ -68,6 +88,11 @@ function createTCPSocket() {
   return uni.createTCPSocket()
 }
 
+// 归一化坐标留四位小数：1/1920 屏宽约等于 0.0005，再细就只是白占带宽。
+function round4(value) {
+  return Math.round(value * 10000) / 10000
+}
+
 export class RemoteSocket {
   constructor() {
     this.target = null // { host, port, token }
@@ -79,9 +104,12 @@ export class RemoteSocket {
     this.socket = null
     this.buffer = new Uint8Array(0)
     this.listeners = []
+    this.frameListeners = []
     this.reconnectTimer = null
     this.closingByHand = false
     this.refused = false
+    // 最后一次「开回显」的报文，重连后自动补发用；null 表示没在要画面。
+    this.mirrorRequest = null
   }
 
   // MARK: - 订阅
@@ -92,6 +120,16 @@ export class RemoteSocket {
     return () => {
       const index = this.listeners.indexOf(listener)
       if (index >= 0) this.listeners.splice(index, 1)
+    }
+  }
+
+  /// 桌面回显帧走单独一条通道：一帧几十 KB、每秒好几条，混进 onChange 会让所有
+  /// 挂着状态栏的面板跟着重渲染，而它们一个字节都不关心。
+  onFrame(listener) {
+    this.frameListeners.push(listener)
+    return () => {
+      const index = this.frameListeners.indexOf(listener)
+      if (index >= 0) this.frameListeners.splice(index, 1)
     }
   }
 
@@ -267,13 +305,21 @@ export class RemoteSocket {
     } catch (e) {
       return
     }
+    if (payload.t === 'frame') {
+      this.frameListeners.forEach((listener) => listener(payload))
+      return
+    }
     if (payload.t === 'welcome') {
       this.welcome = payload
       this.screen = payload.screen || null
+      // 重连之后 Mac 那边的订阅早随连接掉了：不补发一次，手机看到的会永远
+      // 停在断线前那一帧，而且看着像「卡住」而不是「停了」。
+      if (this.mirrorRequest) this.sendRaw(this.mirrorRequest)
     } else if (payload.t === 'error') {
       this.lastError = payload.message || 'Mac 拒绝了这次请求'
-      // 记下「Mac 明确拒过」：随后的关闭不该把这句盖掉，重连也只会重复同一个错误
-      this.refused = true
+      // 只有配对类错误才算「重试也没用」：像「没给屏幕录制权限」这种是在 Mac 上
+      // 能解决再回来的事，记成 refused 会让断线之后不再自动重连。
+      this.refused = payload.code === 'badToken' || payload.code === 'notAuthenticated'
     }
     this.emit()
   }
@@ -301,6 +347,27 @@ export class RemoteSocket {
   // 双指滚动的位移按手指那侧的像素发，方向就是手指划的方向，翻不翻号由 Mac 定。
   scroll(dx, dy) {
     return this.sendRaw({ t: 'scroll', dx: Math.round(dx), dy: Math.round(dy) })
+  }
+
+  /// 触屏页的「点哪儿就是哪儿」：发主屏归一化坐标（0…1），换算交给 Mac，
+  /// 所以手机不需要知道对端是 1440 还是 3025 宽的屏。
+  warp(x, y) {
+    return this.sendRaw({ t: 'warp', x: round4(x), y: round4(y) })
+  }
+
+  /// 开关桌面回显。想要的参数记一份，断线重连后由 welcome 那条分支补发，
+  /// 页面自己不用管连接换了几条。
+  mirror(on, options = {}) {
+    const payload = on
+      ? { t: 'mirror', on: true, w: options.width || 720, fps: options.fps || 3, q: options.quality || 45 }
+      : { t: 'mirror', on: false }
+    this.mirrorRequest = on ? payload : null
+    return this.sendRaw(payload)
+  }
+
+  /// Mac 端的协议版本：1 没有回显也没有绝对坐标，触屏页靠它决定要不要提示升级。
+  get proto() {
+    return (this.welcome && this.welcome.proto) || 0
   }
 
   ping() {
