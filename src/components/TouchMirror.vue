@@ -1,6 +1,6 @@
 <template>
   <view class="mirror-wrap">
-    <view class="card board" :class="{ flush: landscape }">
+    <view class="card board">
       <canvas
         type="2d"
         id="mirror"
@@ -21,11 +21,12 @@
       <button class="key mini" size="mini" :class="{ held: !sharp }" @tap="pick(false)">流畅</button>
       <button class="key mini" size="mini" :class="{ held: sharp }" @tap="pick(true)">清晰</button>
       <button class="key mini" size="mini" @tap="resetView">还原视图</button>
-      <button class="key mini" size="mini" @tap="turn">{{ landscape ? '竖屏' : '横屏' }}</button>
+      <button class="key mini" size="mini" @tap="turn">{{ rotated ? '竖屏' : '横屏' }}</button>
     </view>
 
-    <!-- 横屏时竖向空间金贵：说明只在竖屏页给，横屏是从竖屏跳进来的。 -->
-    <text class="tip" v-if="!landscape">轻点=左键，快速两下=双击，双指轻点=右键，单指拖=滚动，按住不动再拖=拖窗口，双指捏合=放大。</text>
+    <!-- 这句在旋转前后必须一字不变：卡片是 flex:1，文字换行少一行画布就长高一截，
+         整页布局跟着挪，点按落点全偏。转的只是画布里的画法，布局不该跟着状态走。 -->
+    <text class="tip">轻点=左键，快速两下=双击，双指轻点=右键，单指拖=滚动，双指捏合=放大。按「横屏」后把手机顶边转向左边，画面就是正的。</text>
   </view>
 </template>
 
@@ -42,6 +43,9 @@ const FLUSH_INTERVAL = 60
 // 1 倍就是「整屏刚好装下」，再往外缩只剩黑边，所以缩放只许往大走。
 const MAX_SCALE = 6
 
+// 一帧解码的耐心：正常几十毫秒，超过这个数就是回调根本没来。
+const DECODE_TIMEOUT = 2000
+
 const MODES = { SMOOTH: { width: 640, fps: 4, quality: 40 }, SHARP: { width: 1280, fps: 2, quality: 62 } }
 
 function dist(a, b) {
@@ -53,10 +57,14 @@ function mid(a, b) {
 }
 
 /**
- * 桌面回显 + 手指点按，竖屏 tab 页和横屏页共用这一份。
+ * 桌面回显 + 手指点按，触屏 tab 页用这一份。
  *
  * 定位一律走 warp（主屏归一化坐标），所以这里只关心「手指这个点在画面上对应桌面的
  * 几分之几」，跟 Mac 的分辨率、帧图缩放比都没关系。
+ *
+ * 「横屏」不转页面：微信没有运行时转屏 API，整页转屏得另开一张声明 landscape 的页面，
+ * 而那一页里所有布局都要重排。这里只把画布里的画面转 90°，页面还是竖屏那张，
+ * 按钮和说明留在原位，用户把手机转横就能看到用满长边的大画面。
  *
  * 页面的显示/隐藏由外面转发进来（pageShow/pageHide）：自定义组件收不到页面的
  * onShow/onHide，而画面必须在离开时停掉，不然两台设备抢着推流。
@@ -64,18 +72,16 @@ function mid(a, b) {
 export default {
   name: 'TouchMirror',
 
-  props: {
-    landscape: { type: Boolean, default: false },
-  },
-
   data() {
     return {
       hasFrame: false,
       sharp: false,
       scale: 1,
+      rotated: false,
       state: 'idle',
       lastError: '',
       proto: 0,
+      received: 0,
     }
   },
 
@@ -84,6 +90,8 @@ export default {
       if (this.lastError) return this.lastError
       if (this.state !== 'open') return '先连上 Mac 才会有画面'
       if (this.proto && this.proto < 2) return '这台 MacStroke 还不支持触屏回显，请升级后重试'
+      // 真机上最有用的一句：分清楚是 Mac 没发，还是收到了却画不出来（解码那一路断了）。
+      if (this.received) return `Mac 在发画面，已经收到 ${this.received} 帧，但这台手机一张都没画出来`
       return '等待画面…'
     },
     canRetry() {
@@ -91,6 +99,16 @@ export default {
     },
     zoomText() {
       return this.scale.toFixed(1) + '×'
+    },
+  },
+
+  watch: {
+    /**
+     * 状态行多出一行报错就把整页往下顶 22px 左右，画布跟着挪位：位置必须重量一次，
+     * 不然点按会整体偏掉那一截（真机上「连接被拒」那句一出来就中招）。
+     */
+    lastError() {
+      this.$nextTick(() => this.measure())
     },
   },
 
@@ -106,6 +124,8 @@ export default {
       frameW: 0,
       frameH: 0,
       decoding: false,
+      shownJpg: '',
+      watchdog: null,
       panX: 0,
       panY: 0,
       visible: false,
@@ -229,17 +249,6 @@ export default {
         if (!board.canvas) {
           board.canvas = found.node
           board.ctx = found.node.getContext('2d')
-          board.image = found.node.createImage()
-          board.image.onload = () => {
-            board.decoding = false
-            this.hasFrame = true
-            this.lastError = ''
-            this.paint()
-          }
-          board.image.onerror = () => {
-            board.decoding = false
-            this.lastError = '画面解码失败，可以点「重试画面」'
-          }
         }
         if (resized) this.resizeBitmap()
         if (done) done()
@@ -265,43 +274,74 @@ export default {
       const board = this.board
       const image = board.image
       if (!board.ctx || !image || !board.frameW) return
+      const size = board.size
       const box = this.layout()
-      board.ctx.clearRect(0, 0, board.size.width, board.size.height)
+      board.ctx.save()
+      // 擦除要在没转的那一层做：位图是按 CSS 尺寸×dpr 铺的，转了以后矩形对不上画布。
+      board.ctx.clearRect(0, 0, size.width, size.height)
+      if (this.rotated) board.ctx.transform(0, 1, -1, 0, size.width, 0)
       board.ctx.drawImage(image, box.x, box.y, box.w, box.h)
+      board.ctx.restore()
     },
 
-    /// 当前视图：帧图按 contain 铺底，再乘缩放、加平移，全部用 CSS 像素。
+    /// 视图空间：手机转横以后看到的那块正画面。转 90° 只是画布内部的画法，
+    /// 画布本身的 CSS 尺寸没变，所以这里把宽高互换。
+    viewSize() {
+      const s = this.board.size
+      return this.rotated ? { width: s.height, height: s.width } : { width: s.width, height: s.height }
+    },
+
+    /// 当前视图：帧图按 contain 铺底，再乘缩放、加平移，全部用视图空间的 CSS 像素。
     layout() {
       const board = this.board
+      const view = this.viewSize()
       const fw = board.frameW || 16
       const fh = board.frameH || 10
-      const base = Math.min(board.size.width / fw, board.size.height / fh) || 1
+      const base = Math.min(view.width / fw, view.height / fh) || 1
       const w = fw * base * this.scale
       const h = fh * base * this.scale
       return {
         w,
         h,
-        x: (board.size.width - w) / 2 + board.panX,
-        y: (board.size.height - h) / 2 + board.panY,
+        x: (view.width - w) / 2 + board.panX,
+        y: (view.height - h) / 2 + board.panY,
       }
     },
 
-    /// 手指点 → 主屏归一化坐标（0…1），Mac 那边按自己的分辨率换算。
-    /// 竖屏里桌面只占画布中间一条，上下都是黑边：点黑边不该算点到桌面边缘，
-    /// 所以画面外直接返回 null，由调用方当成「没按」。
+    /**
+     * 手指点 → 主屏归一化坐标（0…1），Mac 那边按自己的分辨率换算。
+     * 桌面只占画布中间一块，四周是黑边：点黑边不该算点到桌面边缘，
+     * 所以画面外直接返回 null，由调用方当成「没按」。
+     */
     normalized(touch) {
-      const board = this.board
+      const point = this.toView(touch.clientX, touch.clientY)
       const box = this.layout()
-      const x = (touch.clientX - board.rect.left - box.x) / box.w
-      const y = (touch.clientY - board.rect.top - box.y) / box.h
+      const x = (point.x - box.x) / box.w
+      const y = (point.y - box.y) / box.h
       if (x < 0 || x > 1 || y < 0 || y > 1) return null
       return { x, y }
     },
 
+    /// 画布坐标 → 视图坐标，必须和 paint() 里那串 transform 严格互逆：
+    /// 画布上的 (x, y) 对应视图里的 (y, W - x)。写反一个符号，横屏模式里点的位置
+    /// 和发出去的 warp 就会绕着中心转着方向偏。
+    toView(clientX, clientY) {
+      const board = this.board
+      const x = clientX - board.rect.left
+      const y = clientY - board.rect.top
+      return this.rotated ? { x: y, y: board.size.width - x } : { x, y }
+    },
+
+    /// 手指在手机上划的位移 → 视图空间位移，和 toView 同一套旋转。
+    viewDelta(delta) {
+      return this.rotated ? { x: delta.y, y: -delta.x } : delta
+    },
+
     /// 手指划过的 CSS 像素换成桌面像素：要让画面上的内容跟着手指走，就得按当前缩放比放大。
     toDesktop(delta) {
+      const step = this.viewDelta(delta)
       const box = this.layout()
-      return { x: (delta.x * this.board.frameW) / box.w, y: (delta.y * this.board.frameH) / box.h }
+      return { x: (step.x * this.board.frameW) / box.w, y: (step.y * this.board.frameH) / box.h }
     },
 
     // MARK: - 回显开关
@@ -332,14 +372,11 @@ export default {
       this.paint()
     },
 
-    /// 微信没有运行时转屏的 API（pageOrientation 只能写在页面 json 里），所以「横屏」
-    /// 是跳到那张声明了 landscape 的同款页面，「竖屏」再跳回来。
+    /// 转的只是画面：页面还是这一张竖屏页，按钮和说明的位置一动不动，
+    /// 省掉「为横屏重排一套布局」和「运行时转屏根本没有 API」两件事。
     turn() {
-      if (this.landscape) {
-        uni.navigateBack()
-        return
-      }
-      uni.navigateTo({ url: '/pages/touch-land/touch-land' })
+      this.rotated = !this.rotated
+      this.resetView()
     },
 
     // MARK: - 手势
@@ -471,27 +508,29 @@ export default {
       const board = this.board
       const spread = dist(touches[0], touches[1])
       const center = mid(touches[0], touches[1])
-      const dx = center.clientX - board.lastX
-      const dy = center.clientY - board.lastY
-      board.moved += Math.abs(dx) + Math.abs(dy)
+      const page = { x: center.clientX - board.lastX, y: center.clientY - board.lastY }
+      const slide = this.viewDelta(page)
+      const local = this.toView(center.clientX, center.clientY)
+      board.moved += Math.abs(page.x) + Math.abs(page.y)
       const grown = board.lastSpread > 20 && spread > 20
         ? Math.min(Math.max(this.scale * (spread / board.lastSpread), 1), MAX_SCALE) / this.scale
         : 1
       if (grown !== 1) {
         // 以捏合前的中点为锚：手指还按着的时候画面要跟着手指走，不能整块跳回中间。
         const box = this.layout()
-        const localX = center.clientX - dx - board.rect.left
-        const localY = center.clientY - dy - board.rect.top
-        const u = (localX - box.x) / box.w
-        const v = (localY - box.y) / box.h
+        const view = this.viewSize()
+        const anchorX = local.x - slide.x
+        const anchorY = local.y - slide.y
+        const u = (anchorX - box.x) / box.w
+        const v = (anchorY - box.y) / box.h
         this.scale *= grown
         const wide = box.w * grown
         const high = box.h * grown
-        board.panX = localX - u * wide - (board.size.width - wide) / 2
-        board.panY = localY - v * high - (board.size.height - high) / 2
+        board.panX = anchorX - u * wide - (view.width - wide) / 2
+        board.panY = anchorY - v * high - (view.height - high) / 2
       }
-      board.panX += dx
-      board.panY += dy
+      board.panX += slide.x
+      board.panY += slide.y
       board.lastSpread = spread
       board.lastX = center.clientX
       board.lastY = center.clientY
@@ -530,6 +569,7 @@ export default {
       this.releaseHold()
       this.clearHoldTimer()
       this.stopFlush()
+      this.clearWatchdog()
       this.board.mode = ''
       this.board.fingers = 0
       this.board.moved = 0
@@ -568,13 +608,66 @@ export default {
 
     onFrame(payload) {
       const board = this.board
-      if (!board.image || !payload.jpg) return
+      if (!board.canvas || !payload.jpg) return
       board.frameW = payload.w
       board.frameH = payload.h
+      // 只在一张都还没画出来时把帧数写进视图：那正是需要这句话的时候；画面一旦出来，
+      // 每帧一次响应式赋值就是白花掉的渲染。
+      if (!this.hasFrame) this.received += 1
+      // 桌面没动时 JPEG 逐字节相同，同一张图再解一遍只是费电。
+      if (payload.jpg === board.shownJpg) return
       // 上一帧还在解码就丢掉这一帧：排队会让手机看到几秒前的桌面，点下去全是错位。
       if (board.decoding) return
+      this.decode(payload.jpg)
+    },
+
+    /// 每帧新建一张图，不复用同一个 image 对象。
+    ///
+    /// iOS 真机上给同一个 image 重复赋相同的 src 不会再触发 onload（微信社区已确认，
+    /// 桌面静止时编码结果正好逐字节相同），于是 decoding 永远清不掉，之后每一帧都在
+    /// 上面那个 if 里被丢掉：画面冻在第一帧，看着完全像「Mac 没在推流」，而开发者工具
+    /// 用的是 Chromium 的 Image 实现，重复赋值照样回调，所以只有真机出问题。
+    decode(jpg) {
+      const board = this.board
       board.decoding = true
-      board.image.src = 'data:image/jpeg;base64,' + payload.jpg
+      const image = board.canvas.createImage()
+      image.onload = () => {
+        if (board.image !== image) return
+        board.decoding = false
+        board.shownJpg = jpg
+        this.hasFrame = true
+        this.lastError = ''
+        this.clearWatchdog()
+        this.paint()
+      }
+      image.onerror = () => {
+        if (board.image !== image) return
+        board.decoding = false
+        this.clearWatchdog()
+        this.lastError = '画面解码失败，可以点「重试画面」'
+      }
+      board.image = image
+      image.src = 'data:image/jpeg;base64,' + jpg
+      this.armWatchdog()
+    },
+
+    /// 万一某台机型既不回 onload 也不回 onerror，也不能让 decoding 永久挂着：
+    /// 超时就自己把标记清掉，下一帧换新图重来。
+    armWatchdog() {
+      const board = this.board
+      this.clearWatchdog()
+      board.watchdog = setTimeout(() => {
+        board.watchdog = null
+        board.decoding = false
+      }, DECODE_TIMEOUT)
+    },
+
+    clearWatchdog() {
+      const board = this.board
+      if (board.watchdog) {
+        clearTimeout(board.watchdog)
+        board.watchdog = null
+      }
     },
   },
 }
@@ -596,13 +689,6 @@ export default {
   min-height: 0;
   position: relative;
   overflow: hidden;
-}
-
-/* 横屏：竖向只有那么三两百像素，卡片内边距和圆角全去掉，画面直接铺到屏幕边。 */
-.board.flush {
-  padding: 0;
-  margin-bottom: 0;
-  border-radius: 0;
 }
 
 .mirror {
