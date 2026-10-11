@@ -20,9 +20,12 @@
     <view class="tools">
       <button class="key mini" size="mini" :class="{ held: !sharp }" @tap="pick(false)">流畅</button>
       <button class="key mini" size="mini" :class="{ held: sharp }" @tap="pick(true)">清晰</button>
-      <button class="key mini" size="mini" @tap="resetView">还原视图</button>
+      <button class="key mini" size="mini" @tap="resetView">复位</button>
       <button class="key mini" size="mini" @tap="turn">{{ rotated ? '竖屏' : '横屏' }}</button>
+      <button class="key mini" size="mini" v-if="canKey" :class="{ held: keypad }" @tap="toggleKeypad">键盘</button>
     </view>
+
+    <input-keypad v-if="keypad" ref="keypad" @close="toggleKeypad" @relayout="relayout" />
 
     <!-- 这句在旋转前后必须一字不变：卡片是 flex:1，文字换行少一行画布就长高一截，
          整页布局跟着挪，点按落点全偏。转的只是画布里的画法，布局不该跟着状态走。 -->
@@ -32,6 +35,7 @@
 
 <script>
 import { remote } from '@/utils/socket.js'
+import InputKeypad from './InputKeypad.vue'
 
 // 手势门槛与触摸板页保持一致，两页之间不该换个手感。
 const TAP_SLOP = 10
@@ -71,6 +75,7 @@ function mid(a, b) {
  */
 export default {
   name: 'TouchMirror',
+  components: { InputKeypad },
 
   data() {
     return {
@@ -78,6 +83,7 @@ export default {
       sharp: false,
       scale: 1,
       rotated: false,
+      keypad: false,
       state: 'idle',
       lastError: '',
       proto: 0,
@@ -96,6 +102,11 @@ export default {
     },
     canRetry() {
       return this.state === 'open' && this.proto >= 2
+    },
+    /// 文本注入与快捷键是 v3 才有的：旧版 Mac 会回「不认识这条指令」，
+    /// 用户点了半天只拿到一句报错。所以直接不给按钮，先升级 Mac 再说。
+    canKey() {
+      return this.proto >= 3
     },
     zoomText() {
       return this.scale.toFixed(1) + '×'
@@ -377,6 +388,19 @@ export default {
     turn() {
       this.rotated = !this.rotated
       this.resetView()
+    },
+
+    /// 键盘面板是正常流里的一块（浮到画面之上在部分机型会被原生画布吃掉），
+    /// 一开一合画布就矮一截、位置也变，所以每次都要重量坐标。
+    toggleKeypad() {
+      this.keypad = !this.keypad
+      this.relayout()
+    },
+
+    /// 延一手再量：原生侧的布局要过一帧才落定，软键盘收起时页面被顶上去又落回来
+    /// 也要等动画结束，nextTick 那一刻拿到的还是旧位置。
+    relayout() {
+      setTimeout(() => this.measure(), 300)
     },
 
     // MARK: - 手势

@@ -9,7 +9,7 @@
 //
 // 协议（对应 MacStroke 的 Sources/RemoteControl/RemoteCommand.swift）：一行一条 JSON。
 //   发出 {"t":"hello","token":…,"name":…} / ping / move{dx,dy} / click{btn,double} / button{btn,down}
-//        / scroll{dx,dy} / warp{x,y} / mirror{on,w,fps,q}
+//        / scroll{dx,dy} / warp{x,y} / mirror{on,w,fps,q} / type{s} / key{k,m}
 //   收到 welcome / ack / error，以及开了回显后的 {"t":"frame","i","w","h","jpg":<base64>}
 //
 // 回显帧一行的量级是几十到上百 KB，所以它走单独的订阅通道：既不该为此把整个页面的
@@ -363,6 +363,21 @@ export class RemoteSocket {
       : { t: 'mirror', on: false }
     this.mirrorRequest = on ? payload : null
     return this.sendRaw(payload)
+  }
+
+  /// 文本注入。中文、emoji 这些用手机键盘敲出来的字，Mac 键盘上压根没有对应的键，
+  /// 所以整串原样发过去，切块与超长截断都由 Mac 那边定（协议 v3）。
+  sendText(text) {
+    if (!text) return false
+    return this.sendRaw({ t: 'type', s: text })
+  }
+
+  /// 一次快捷键按下：name 是键名（c、return、f5），modifiers 是「cmd+shift」这样的串。
+  /// 串为空就干脆不给 m 字段——Mac 那边认的是「字段缺席＝不带修饰键」，
+  /// 给了又看不懂会整条报文被拒，不如不发。
+  sendKey(name, modifiers = '') {
+    if (!name) return false
+    return this.sendRaw(modifiers ? { t: 'key', k: name, m: modifiers } : { t: 'key', k: name })
   }
 
   /// Mac 端的协议版本：1 没有回显也没有绝对坐标，触屏页靠它决定要不要提示升级。
