@@ -73,12 +73,13 @@ WX_UPLOAD_KEY_FILE=~/Downloads/private.wx441afe8e18ebd358.key \
 - `src/utils/layout.js` — 自定义导航下第一块内容的顶部留白（按胶囊位置算）。
 - `src/components/ControlPad.vue` — 手势引擎（`mode="track"` 触摸板 / `mode="pad"` 摇杆）。
 - `src/components/TouchMirror.vue` — 触屏页的桌面回显 + 手指点按（warp 绝对定位、缩放、横屏画法）。
-- `src/components/InputKeypad.vue` — 文本注入与快捷键面板（协议 v3 的 `type` / `key`）。
+- `src/components/InputKeypad.vue` — 文本注入与快捷键面板（协议 v3 的 `type` / `key`），触屏页的面板与键盘页共用。
 - `src/components/StatusBar.vue` — 只读的连接状态行。
 - `src/pages/index/index.vue` — 触摸板页（tab 1）。
 - `src/pages/touch/touch.vue` — 触屏页（tab 2，回显 + 键盘面板）。
-- `src/pages/joystick/joystick.vue` — 摇杆页（tab 3）。
-- `src/pages/mine/mine.vue` — 我的：连接状态 + 扫码/手填配对（tab 4）。
+- `src/pages/keyboard/keyboard.vue` — 键盘页（tab 3，纯输入：文本注入 + 快捷键，无回显）。
+- `src/pages/joystick/joystick.vue` — 摇杆页（tab 4）。
+- `src/pages/mine/mine.vue` — 我的：连接状态 + 扫码/手填配对（tab 5）。
 - `ci/upload.mjs` — 产物校验 + 上传微信后台，CI 和本地共用同一条路径。
 
 ## 已知限制（都来自微信侧，不是这里能绕的）

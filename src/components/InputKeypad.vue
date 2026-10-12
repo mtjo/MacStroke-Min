@@ -11,7 +11,7 @@
         @blur="$emit('relayout')"
       />
       <button class="act" size="mini" @tap="send">发送</button>
-      <button class="act" size="mini" @tap="$emit('close')">收起</button>
+      <button class="act" size="mini" v-if="closable" @tap="$emit('close')">收起</button>
     </view>
 
     <view class="line">
@@ -99,6 +99,14 @@ const KEYS = [
  */
 export default {
   name: 'InputKeypad',
+
+  props: {
+    /// 嵌在回显页里时要给一个「收起」；独占一整页（键盘 tab）时收起没意义，切标签就是退出。
+    closable: {
+      type: Boolean,
+      default: true,
+    },
+  },
 
   data() {
     return {

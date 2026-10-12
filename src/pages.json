@@ -17,6 +17,14 @@
 			}
 		},
 		{
+			"path": "pages/keyboard/keyboard",
+			"style": {
+				"navigationBarTitleText": "MacStroke 遥控",
+				"navigationStyle": "custom",
+				"disableScroll": true
+			}
+		},
+		{
 			"path": "pages/joystick/joystick",
 			"style": {
 				"navigationBarTitleText": "MacStroke 遥控",
@@ -48,6 +56,12 @@
 				"text": "触屏",
 				"iconPath": "static/tab-touch-off.png",
 				"selectedIconPath": "static/tab-touch-on.png"
+			},
+			{
+				"pagePath": "pages/keyboard/keyboard",
+				"text": "键盘",
+				"iconPath": "static/tab-key-off.png",
+				"selectedIconPath": "static/tab-key-on.png"
 			},
 			{
 				"pagePath": "pages/joystick/joystick",
